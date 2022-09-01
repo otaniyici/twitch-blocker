@@ -1,7 +1,10 @@
 const axios = require("axios");
+const { refreshToken } = require("./authController");
 
 const CLIENT_ID = process.env.CLIENT_ID;
 const AUTH = require("./authController").AUTH;
+
+let blockedCount = 0;
 
 const getUser = async (login) => {
   try {
@@ -45,7 +48,7 @@ const getUserFollowers = async (to_id, cursor) => {
   }
 };
 
-const getUserSubs = async (broadcaster_id) => {
+const getUserSubs = async (broadcaster_id, cursor) => {
   try {
     const url = "https://api.twitch.tv/helix/subscriptions";
     const response = await axios({
@@ -56,10 +59,13 @@ const getUserSubs = async (broadcaster_id) => {
         "Client-Id": `${CLIENT_ID}`,
       },
       params: {
+        broadcaster_id,
         after: cursor,
         first: 100,
       },
     });
+    console.log(response.data);
+
     return response.data;
   } catch (error) {
     console.log(error);
@@ -86,7 +92,7 @@ const getUserBlocks = async (broadcaster_id) => {
   }
 };
 
-const blockUser = async (target_user_id) => {
+const blockUser = async (target_user_id, interval) => {
   try {
     const url = "https://api.twitch.tv/helix/users/blocks";
     const response = await axios({
@@ -100,18 +106,31 @@ const blockUser = async (target_user_id) => {
         target_user_id,
       },
     });
+
+    if (response.status === 204) {
+      blockedCount++;
+      // return console.log(response.status, " : ", target_user_id);
+    }
+  } catch ({ response }) {
+    // console.log("ERROR STATUS: ", response.status);
     if (response.status === 401) {
+      await refreshToken();
+      await blockUser(target_user_id, interval);
     }
-    if (response.status !== 204) {
-      return res.json({});
+    if (response.status === 400) {
+      await blockUser(target_user_id, interval);
     }
-    return;
-  } catch (error) {
-    console.log(error);
+    if (response.status === 429) {
+      // console.log("Trying again: ", target_user_id);
+      // console.log("interval: ", interval);
+      setTimeout(() => {
+        blockUser(target_user_id, interval + 500);
+      }, interval);
+    }
   }
 };
 
-//"/users/blocks/:username"
+// "/users/blocks/:username"
 exports.get_user_blocks = async (req, res) => {
   try {
     const user = await getUser(req.params.username);
@@ -124,7 +143,15 @@ exports.get_user_blocks = async (req, res) => {
   }
 };
 
-//"/users/blocks/:login_name"
+exports.get_user_subs = async (req, res) => {
+  const streamer = await getUser(req.params.login_name);
+  const data = await getUserSubs(streamer.data[0].id);
+  res.json({
+    data,
+  });
+};
+
+// "/users/blocks/:login_name"
 exports.post_user_blocks = async (req, res) => {
   const streamer = await getUser(req.params.login_name);
   const STREAMER_TO_BLOCK = streamer.data[0].id;
@@ -138,13 +165,13 @@ exports.post_user_blocks = async (req, res) => {
   // cursor for pagination
   const cursor = follower_data.pagination.cursor;
   const followers = follower_data.data;
-  // Block the Users
+  // block the Users
   await Promise.all(
-    followers.map(async (follower) => {
-      await blockUser(follower.from_id);
+    followers.map((follower) => {
+      return blockUser(follower.from_id, 1000);
     })
   );
-
+  console.log(blockedCount);
   res.json({
     cursor,
   });

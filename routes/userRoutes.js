@@ -5,6 +5,8 @@ const userController = require("../controllers/userController");
 
 router.route("/blocks/:username").get(userController.get_user_blocks);
 
+// router.route("/subs/:username").get(userController.get_user_subs);
+
 router.route("/blocks/:login_name").post(userController.post_user_blocks);
 
 module.exports = router;
